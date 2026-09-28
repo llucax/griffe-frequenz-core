@@ -10,7 +10,7 @@ has to keep its hands off either.
 
 from typing import TYPE_CHECKING, TypeAlias
 
-from frequenz.core.warnings import deprecated_aliases
+from frequenz.core.warnings import DeprecatedAlias, deprecated_aliases
 
 if TYPE_CHECKING:
     from samplepkg.newmod import Widget as _Widget
@@ -24,4 +24,7 @@ if TYPE_CHECKING:
         Use ``samplepkg.newmod.Widget`` instead.
     """
 else:
-    __getattr__ = deprecated_aliases(__name__, {"Widget": "samplepkg.newmod"})
+    __getattr__ = deprecated_aliases(
+        __name__,
+        DeprecatedAlias("Widget", new_module="samplepkg.newmod", since="v1.2.0"),
+    )
