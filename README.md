@@ -56,7 +56,7 @@ deprecation gets:
 
 - a `deprecated` label,
 - its notice stored in the object's `deprecated` field,
-- an admonition with the notice, inserted at the top of its docstring.
+- an admonition with the notice, at the top of its docstring.
 
 The notice follows the [deprecations
 guide](https://github.com/frequenz-floss/docs/blob/v0.x.x/python/deprecations.md):
@@ -197,11 +197,12 @@ removed in a future release.", and a warning is logged.
 
 When the docstring of a deprecated object already has a deprecation
 admonition, the extension doesn't add one, and only adds the label and the
-`deprecated` field. It counts as a deprecation admonition if it is a
-`Deprecated:` section, or an admonition whose title matches the `title`
-option, ignoring case. Write one wherever the helper can't generate a
-complete notice, or when the generated one is not enough, for example to point
-at a migration guide:
+`deprecated` field. It moves the hand-written one to the top of the
+docstring, where a generated one goes, since a docstring has to start with its
+summary. It counts as a deprecation admonition if it is a `Deprecated:`
+section, or an admonition whose title matches the `title` option, ignoring
+case. Write one wherever the helper can't generate a complete notice, or when
+the generated one is not enough, for example to point at a migration guide:
 
 ```python
 if TYPE_CHECKING:
