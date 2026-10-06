@@ -790,7 +790,8 @@ def test_a_bad_default_message_falls_back_to_a_generic_one(
         "Deprecated since v1.4.0. Use [`samplepkg.newmod.MAX_WIDGETS`][] instead."
     )
     assert any(
-        "samplepkg.oldmod.MAX_WIDGETS: " in record.message
+        record.levelno == logging.WARNING
+        and "samplepkg.oldmod.MAX_WIDGETS: " in record.message
         and "is not a template with only {old}, {new}, {new_link} and {since}"
         in record.message
         for record in caplog.records

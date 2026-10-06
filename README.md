@@ -67,9 +67,10 @@ helper's arguments say that, the notice is generated from them; everywhere
 else, it is written by hand, as a `Deprecated:` section in the docstring,
 which always replaces the generated one.
 
-When an argument cannot be read statically, the notice says as much as can
-be read: since which version and what to use instead when those are known,
-and only that the object will be removed in a future release when neither is.
+When a notice can't say everything the guide asks for, because an argument
+cannot be read statically or because the helper only has the runtime
+warning, the object still gets one, saying as much as is known, and a warning
+is logged, so a strict build fails until the notice is written by hand.
 
 If you have a custom admonition style for deprecations, you can set the `kind`
 option to match it.
@@ -153,9 +154,9 @@ The details of what gets documented:
   it links the target in code font.
 - An entry's `message` is only its runtime warning, so it doesn't change the
   notice. An entry giving `message` instead of `since` can't say since which
-  version it is deprecated, so its notice only says what to use instead: write
-  the notice by hand in the docstring of the name declared under
-  `TYPE_CHECKING`.
+  version it is deprecated, so its notice only says what to use instead, and a
+  warning is logged: write the notice by hand in the docstring of the name
+  declared under `TYPE_CHECKING`.
 - The target is linked with a normal cross-reference, so one that cannot be
   resolved is reported by `mkdocs-autorefs`. For a target in another project,
   add that project's `objects.inv` URL to the Python handler's `inventories`.
@@ -181,24 +182,26 @@ class TaskStatus(Enum):
     WAITING = DeprecatedMember(1, "WAITING is deprecated, use OPEN instead")
 ```
 
-Both members are marked with their message as written, and their value is
-rendered as the real value instead of the wrapper call, so the documentation
-shows `PENDING = 1`.
+Both members are marked, and their value is rendered as the real value instead
+of the wrapper call, so the documentation shows `PENDING = 1`. The wrapper
+only carries the runtime warning, so the notice is written by hand; without
+one, the runtime warning is shown as the notice, rendered as Markdown, and a
+warning is logged.
 
 A recognized wrapper still marks the member when its message is held in a
-variable or returned by a helper. Its value is unwrapped as written, and the
-message is a generic one, "Deprecated. It will be removed in a future
-release.". A hand-written notice is kept instead, so write the message as a
-literal or write the notice by hand when the generic one is not enough.
+variable or returned by a helper. Its value is unwrapped as written, and,
+without a hand-written notice, it gets a generic one, "Deprecated. It will be
+removed in a future release.", and a warning is logged.
 
 ### Hand-written admonitions
 
 When the docstring of a deprecated object already has a deprecation
-admonition, the extension leaves the docstring alone and only adds the label
-and the `deprecated` field. It counts as a deprecation admonition if it is a
+admonition, the extension doesn't add one, and only adds the label and the
+`deprecated` field. It counts as a deprecation admonition if it is a
 `Deprecated:` section, or an admonition whose title matches the `title`
-option, ignoring case. Write one when the notice is not enough, for example
-to point at a migration guide:
+option, ignoring case. Write one wherever the helper can't generate a
+complete notice, or when the generated one is not enough, for example to point
+at a migration guide:
 
 ```python
 if TYPE_CHECKING:
@@ -221,10 +224,11 @@ Griffe reads the source without running it:
   notice what it would have said, since which version or what to use instead,
   and its value is only rewritten when the target is known. The `message` is
   never read.
-- An enum message must be a string literal to be documented. A constant,
-  helper call, f-string or string joined with `+` is not evaluated; adjacent
-  literals, which Python joins by itself, are fine. The enum member is still
-  marked, with a generic message, and its value is unwrapped.
+- An enum message must be a string literal to be shown when there is no
+  hand-written notice. A constant, helper call, f-string or string joined with
+  `+` is not evaluated; adjacent literals, which Python joins by itself, are
+  fine. The enum member is still marked, with a generic notice, and its value
+  is unwrapped.
 - Each alias entry must be a `DeprecatedAlias(...)` call written among the
   arguments of `deprecated_aliases()`. An entry held in a constant, as in
   `deprecated_aliases(__name__, WIDGET)`, or unpacked, as in
@@ -237,8 +241,20 @@ Griffe reads the source without running it:
   unpacked keyword arguments only has its name read, and one with unpacked
   positional arguments is left unmarked.
 
-Each case the extension skips is logged at debug level, which
-`mkdocs build --verbose` shows.
+- Calls are read the way the runtime binds their arguments, and one that
+  doesn't bind is skipped, but argument values are not validated any further:
+  documenting the code is not linting it, and its own tests catch a call that
+  fails when the module is imported.
+
+Every one of these cases is logged as a warning, so `mkdocs build --strict`
+fails instead of the documentation quietly showing less than the code says or
+the guide asks for: a notice that doesn't say since which version or what to
+use instead, a runtime warning shown as the notice, a value left as written,
+or a deprecation left unmarked. A hand-written admonition rules out the ones
+about the notice, since the documentation is complete then. Why something
+could not be read is logged at debug level, which `mkdocs build --verbose`
+shows. A replacement that cannot be linked is reported by `mkdocs-autorefs` in
+the same way.
 
 ### Options
 
