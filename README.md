@@ -51,8 +51,8 @@ plugins:
 ```
 
 Its defaults match `griffe-warnings-deprecated`, so with this configuration
-both kinds of deprecation are rendered the same way. Every deprecation the
-extension recognizes gets the same three things a decorated one gets:
+both kinds of deprecation are rendered the same way. Every recognized
+deprecation gets:
 
 - a `deprecated` label,
 - its notice stored in the object's `deprecated` field,
@@ -66,6 +66,10 @@ links what to use instead, without repeating the object's name. Where the
 helper's arguments say that, the notice is generated from them; everywhere
 else, it is written by hand, as a `Deprecated:` section in the docstring,
 which always replaces the generated one.
+
+When an enum member's message cannot be read statically, a generic one
+stands in for it, saying only that the member is deprecated and will be
+removed.
 
 If you have a custom admonition style for deprecations, you can set the `kind`
 option to match it.
@@ -181,6 +185,12 @@ Both members are marked with their message as written, and their value is
 rendered as the real value instead of the wrapper call, so the documentation
 shows `PENDING = 1`.
 
+A recognized wrapper still marks the member when its message is held in a
+variable or returned by a helper. Its value is unwrapped as written, and the
+message is a generic one, "Deprecated. It will be removed in a future
+release.". A hand-written notice is kept instead, so write the message as a
+literal or write the notice by hand when the generic one is not enough.
+
 ### Hand-written admonitions
 
 When the docstring of a deprecated object already has a deprecation
@@ -203,15 +213,16 @@ if TYPE_CHECKING:
 
 ### Known limitations
 
-Griffe reads the source without running it, so a deprecation is only
-documented when the call can be understood from the syntax tree alone:
+Griffe reads the source without running it, so the call and its message are
+handled separately:
 
-- Enum messages, and alias names, `new_module`, `new_name` and `since` values,
-  must be string literals written in the call. A value held in a constant,
-  built by an f-string or joined with `+` cannot be recovered; adjacent
-  literals, which Python joins by itself, are fine. An enum member or an alias
-  entry with such an argument is left unmarked. An alias' `message` is never
-  read.
+- Alias names, `new_module`, `new_name` and `since` values must be string
+  literals written in the call. A non-literal argument leaves that alias
+  unmarked. An alias' `message` is never read.
+- An enum message must be a string literal to be documented. A constant,
+  helper call, f-string or string joined with `+` is not evaluated; adjacent
+  literals, which Python joins by itself, are fine. The enum member is still
+  marked, with a generic message, and its value is unwrapped.
 - Each alias entry must be a `DeprecatedAlias(...)` call written among the
   arguments of `deprecated_aliases()`. An entry held in a constant, as in
   `deprecated_aliases(__name__, WIDGET)`, or unpacked, as in
@@ -219,8 +230,9 @@ documented when the call can be understood from the syntax tree alone:
   unmarked.
 - The arguments of `deprecated_member()`, `DeprecatedMember` and
   `DeprecatedAlias` must be written out, not unpacked from `*args` or
-  `**kwargs`. `deprecated_member(*ARGS)` is not recognized, and the member is
-  left unmarked.
+  `**kwargs`. A member defined as `deprecated_member(*ARGS)` is marked with a
+  generic message and its value is left as written, and an alias entry with
+  unpacked arguments is left unmarked.
 
 Each case the extension skips is logged at debug level, which
 `mkdocs build --verbose` shows.

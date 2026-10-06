@@ -26,7 +26,7 @@ class TaskStatus(Enum):
     """A value that comes from a call the extension must ignore."""
 
     CANCELLED = deprecated_member(1, _MESSAGE)
-    """A member whose message Griffe cannot read, so it stays unmarked."""
+    """A member whose message Griffe cannot read, so it gets a generic one."""
 
     WAITING = DeprecatedMember(1, "WAITING is deprecated, use OPEN instead")
     """A member using the class form of the wrapper rather than the function."""
