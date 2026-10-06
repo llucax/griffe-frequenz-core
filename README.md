@@ -67,9 +67,9 @@ helper's arguments say that, the notice is generated from them; everywhere
 else, it is written by hand, as a `Deprecated:` section in the docstring,
 which always replaces the generated one.
 
-When an enum member's message cannot be read statically, a generic one
-stands in for it, saying only that the member is deprecated and will be
-removed.
+When an argument cannot be read statically, the notice says as much as can
+be read: since which version and what to use instead when those are known,
+and only that the object will be removed in a future release when neither is.
 
 If you have a custom admonition style for deprecations, you can set the `kind`
 option to match it.
@@ -197,7 +197,7 @@ When the docstring of a deprecated object already has a deprecation
 admonition, the extension leaves the docstring alone and only adds the label
 and the `deprecated` field. It counts as a deprecation admonition if it is a
 `Deprecated:` section, or an admonition whose title matches the `title`
-option, ignoring case. Write one when the message is not enough, for example
+option, ignoring case. Write one when the notice is not enough, for example
 to point at a migration guide:
 
 ```python
@@ -213,12 +213,14 @@ if TYPE_CHECKING:
 
 ### Known limitations
 
-Griffe reads the source without running it, so the call and its message are
-handled separately:
+Griffe reads the source without running it:
 
 - Alias names, `new_module`, `new_name` and `since` values must be string
-  literals written in the call. A non-literal argument leaves that alias
-  unmarked. An alias' `message` is never read.
+  literals written in the call to be documented. An alias whose name is not a
+  literal is left unmarked. Any other non-literal argument leaves out of its
+  notice what it would have said, since which version or what to use instead,
+  and its value is only rewritten when the target is known. The `message` is
+  never read.
 - An enum message must be a string literal to be documented. A constant,
   helper call, f-string or string joined with `+` is not evaluated; adjacent
   literals, which Python joins by itself, are fine. The enum member is still
@@ -231,8 +233,9 @@ handled separately:
 - The arguments of `deprecated_member()`, `DeprecatedMember` and
   `DeprecatedAlias` must be written out, not unpacked from `*args` or
   `**kwargs`. A member defined as `deprecated_member(*ARGS)` is marked with a
-  generic message and its value is left as written, and an alias entry with
-  unpacked arguments is left unmarked.
+  generic message and its value is left as written. An alias entry with
+  unpacked keyword arguments only has its name read, and one with unpacked
+  positional arguments is left unmarked.
 
 Each case the extension skips is logged at debug level, which
 `mkdocs build --verbose` shows.

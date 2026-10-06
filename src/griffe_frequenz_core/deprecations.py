@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, NamedTuple
 
 from griffe import (
     Attribute,
@@ -55,6 +55,35 @@ def _literal(node: Any) -> Any:
         return None
 
 
+def _string(node: Any) -> str | None:
+    """Evaluate a Griffe expression as a string literal.
+
+    Args:
+        node: The expression to evaluate.
+
+    Returns:
+        The string, or `None` if the expression is not a string literal.
+    """
+    value = _literal(node)
+    return value if isinstance(value, str) else None
+
+
+class _AliasEntry(NamedTuple):
+    """What could be read of one alias entry."""
+
+    name: str
+    """The deprecated name, in the module defining the alias."""
+
+    new: str | None
+    """The fully qualified path of the target, or `None` if it cannot be read."""
+
+    local: bool
+    """Whether the target is in the module defining the alias."""
+
+    since: str | None
+    """The version the alias is deprecated since, if given and readable."""
+
+
 def _link(new: str, *, local: bool) -> str:
     """Link a replacement in code font.
 
@@ -71,16 +100,24 @@ def _link(new: str, *, local: bool) -> str:
     return f"[`{new}`][]"
 
 
-def _generic_message() -> str:
-    """Build the message for a deprecation whose own message cannot be read.
+def _generic_message(*, since: str | None = None, new_link: str | None = None) -> str:
+    """Build a notice out of whatever is known about a deprecation.
 
     It is only shown in the documentation of the deprecated object itself, so
-    it doesn't say which object that is, and it says nothing it cannot know.
+    it doesn't say which object that is, and it says as much as is known, and
+    nothing more.
+
+    Args:
+        since: The version the object is deprecated since, if known.
+        new_link: The link to its replacement, if known.
 
     Returns:
-        The generic message.
+        The notice.
     """
-    return "Deprecated. It will be removed in a future release."
+    if since is None and new_link is None:
+        return "Deprecated. It will be removed in a future release."
+    text = "Deprecated." if since is None else f"Deprecated since {since}."
+    return text if new_link is None else f"{text} Use {new_link} instead."
 
 
 def _alias_entry_arguments(
@@ -216,19 +253,21 @@ class DeprecationsExtension(Extension):  # pylint: disable=too-many-instance-att
     too: a class and a function are both read as a call.
 
     Warning:
-        Alias names, `new_module`, `new_name` and `since` values must be string
-        literals written directly in the call. A non-literal argument leaves that
-        alias unmarked, and an alias' `message` is never read. An enum member whose
-        message is not a literal is still marked, with a generic message saying only
-        that it is deprecated and will be removed, and its value is unwrapped as
+        Griffe never runs the code, so only string literals written directly in
+        the call can be read. Whatever cannot be read is left out of a notice
+        saying as much as can be, at least that it is deprecated: an alias only
+        needs its name to be a literal to be marked, and its value is rewritten
+        only if `new_module` and `new_name` are literals. An enum member whose
+        message is not a literal is marked too, and its value is unwrapped as
         written, so it shows `CANCELLED = 1` even when the message comes from a
-        constant or helper call. One whose wrapper arguments are unpacked from
-        `*args` or `**kwargs` gets the generic message too, and its value is left as
-        written. Each alias must be a `DeprecatedAlias(...)` call written directly
-        among the arguments of `deprecated_aliases()`; one held in a constant, or
-        entries unpacked from `*args`, are left unmarked, and so are the arguments
-        of a `DeprecatedAlias` unpacked from `*args` or `**kwargs`. Each of these
-        cases is logged at debug level, which `mkdocs -v` shows.
+        constant or helper call; one whose wrapper arguments are unpacked from
+        `*args` or `**kwargs` keeps its value as written. An alias whose name
+        cannot be read is left unmarked: an entry that is not a
+        `DeprecatedAlias(...)` call written directly among the arguments of
+        `deprecated_aliases()`, such as one held in a constant or unpacked from
+        `*args`, or one with a non-literal name or with its positional
+        arguments unpacked. Each of these cases is logged at debug level, which
+        `mkdocs -v` shows.
 
     Enable it under the mkdocstrings Python handler, alongside the decorator one:
 
@@ -353,12 +392,10 @@ class DeprecationsExtension(Extension):  # pylint: disable=too-many-instance-att
         call = self._alias_table_call(mod)
         if call is None:
             return
-        for name, path, local, since in self._alias_entries(mod, call):
-            text = self._alias_notice(f"{mod.path}.{name}", path, local, since)
-            if text is None:
-                continue
+        for entry in self._alias_entries(mod, call):
+            text, generic = self._alias_notice(f"{mod.path}.{entry.name}", entry)
 
-            member = mod.members.get(name)
+            member = mod.members.get(entry.name)
             if not isinstance(member, Attribute):
                 # Not declared at all, or declared by an import such as
                 # `from new import New as Old` under `TYPE_CHECKING`.
@@ -366,18 +403,16 @@ class DeprecationsExtension(Extension):  # pylint: disable=too-many-instance-att
                     "%s.%s is aliased but not declared as an attribute for type "
                     "checkers, adding one",
                     mod.path,
-                    name,
+                    entry.name,
                 )
-                member = Attribute(name, parent=mod)
-                mod.set_member(name, member)
+                member = Attribute(entry.name, parent=mod)
+                mod.set_member(entry.name, member)
 
-            if self.show_target:
-                member.value = ExprName(path)
-            self._mark(member, text)
+            if self.show_target and entry.new is not None:
+                member.value = ExprName(entry.new)
+            self._mark(member, text, generic=generic)
 
-    def _alias_notice(
-        self, old: str, new: str, local: bool, since: str | None
-    ) -> str | None:
+    def _alias_notice(self, old: str, entry: _AliasEntry) -> tuple[str, bool]:
         """Build the notice of one alias entry.
 
         The notice comes from `since` and the target only: an entry's `message`
@@ -385,32 +420,42 @@ class DeprecationsExtension(Extension):  # pylint: disable=too-many-instance-att
 
         Args:
             old: The fully qualified path of the alias.
-            new: The fully qualified path of its target.
-            local: Whether the target is in the module defining the alias.
-            since: The version the alias is deprecated since, if it gives one.
+            entry: What could be read of the entry.
 
         Returns:
-            The notice, or `None` if `default_message` cannot be formatted.
+            The notice, and whether it is a generic one, saying as much of the
+                entry as could be read.
         """
-        link = _link(new, local=local)
-        if since is None:
-            # It gives a message instead, so the notice can only say what to use
-            # instead.
-            return f"Deprecated. Use {link} instead."
-        try:
-            # `since` is a value, not part of the template, so it is inserted as
-            # written, braces included.
-            return self.default_message.format(
-                old=old, new=new, new_link=link, since=since
+        link = None if entry.new is None else _link(entry.new, local=entry.local)
+        if entry.since is not None and link is not None:
+            try:
+                # `since` is a value, not part of the template, so it is
+                # inserted as written, braces included.
+                return (
+                    self.default_message.format(
+                        old=old, new=entry.new, new_link=link, since=entry.since
+                    ),
+                    False,
+                )
+            except (AttributeError, IndexError, KeyError, ValueError):
+                _logger.debug(
+                    "%s: the `default_message` option %r is not a template with "
+                    "only {old}, {new}, {new_link} and {since}, using a generic "
+                    "notice",
+                    old,
+                    self.default_message,
+                )
+                return _generic_message(since=entry.since, new_link=link), True
+        missing = []
+        if entry.since is None:
+            missing.append(
+                "since which version it is deprecated, without `since` as a string "
+                "literal"
             )
-        except (AttributeError, IndexError, KeyError, ValueError):
-            _logger.debug(
-                "%s: the `default_message` option %r is not a template with only "
-                "{old}, {new}, {new_link} and {since}, leaving the alias unmarked",
-                old,
-                self.default_message,
-            )
-            return None
+        if link is None:
+            missing.append("what to use instead, without a readable target")
+        _logger.debug("%s: the notice can't say %s", old, ", nor ".join(missing))
+        return _generic_message(since=entry.since, new_link=link), True
 
     def on_class_members(self, *, cls: Class, **kwargs: Any) -> None:
         """Mark every wrapped enum member of the class, if it has any.
@@ -481,9 +526,7 @@ class DeprecationsExtension(Extension):  # pylint: disable=too-many-instance-att
             return value
         return None
 
-    def _alias_entries(
-        self, mod: Module, call: ExprCall
-    ) -> list[tuple[str, str, bool, str | None]]:
+    def _alias_entries(self, mod: Module, call: ExprCall) -> list[_AliasEntry]:
         """Extract the alias entries from an alias table call.
 
         The first positional argument is the module name and is skipped. Every
@@ -495,12 +538,9 @@ class DeprecationsExtension(Extension):  # pylint: disable=too-many-instance-att
             call: The alias table call to read.
 
         Returns:
-            The name, the fully qualified path of the symbol it points at,
-                whether that is in the same module, and `since`, or `None` if it
-                gives a message instead, of every entry that could be read, in
-                the order they were written.
+            Every entry whose name could be read, in the order they were written.
         """
-        entries: list[tuple[str, str, bool, str | None]] = []
+        entries: list[_AliasEntry] = []
         module_seen = False
         for argument in call.arguments:
             if isinstance(argument, (ExprKeyword, ExprVarKeyword)):
@@ -524,21 +564,19 @@ class DeprecationsExtension(Extension):  # pylint: disable=too-many-instance-att
                 entries.append(entry)
         return entries
 
-    def _alias_entry(
-        self, mod: Module, node: Any
-    ) -> tuple[str, str, bool, str | None] | None:
-        """Extract the name, where it points, and `since` of one entry.
+    def _alias_entry(self, mod: Module, node: Any) -> _AliasEntry | None:
+        """Read one alias entry, as much of it as can be read.
 
-        The message is only the runtime warning, so it is never read.
+        The name is all that is needed to mark the alias. Where it points, and
+        its `since` or message, are only read if they are string literals.
 
         Args:
             mod: The module the entry was found in, used to report what is skipped.
             node: The expression passed as the entry.
 
         Returns:
-            The name, the fully qualified path of the symbol it points at,
-                whether that is in the same module, and `since`, or `None` if it
-                gives a message instead, or `None` if the entry cannot be read.
+            What could be read of the entry, or `None` if its name cannot be read,
+                or if it is not bound the way the runtime binds it.
         """
         if not (
             isinstance(node, ExprCall) and node.canonical_path in self.alias_classes
@@ -550,10 +588,7 @@ class DeprecationsExtension(Extension):  # pylint: disable=too-many-instance-att
                 node,
             )
             return None
-        if any(
-            isinstance(argument, (ExprVarPositional, ExprVarKeyword))
-            for argument in node.arguments
-        ):
+        if any(isinstance(argument, ExprVarPositional) for argument in node.arguments):
             _logger.debug(
                 "%s: the arguments of the alias entry `%s` are unpacked, "
                 "skipping it",
@@ -561,8 +596,11 @@ class DeprecationsExtension(Extension):  # pylint: disable=too-many-instance-att
                 node,
             )
             return None
+        if any(isinstance(argument, ExprVarKeyword) for argument in node.arguments):
+            return self._alias_entry_with_unpacked_keywords(mod, node)
         arguments = _alias_entry_arguments(node)
         if arguments is None:
+            # It would fail at runtime, so it deprecates nothing.
             _logger.debug(
                 "%s: the alias entry `%s` does not take exactly a positional "
                 "name, `new_module`, `new_name` or both, and either `since` or a "
@@ -571,30 +609,75 @@ class DeprecationsExtension(Extension):  # pylint: disable=too-many-instance-att
                 node,
             )
             return None
-        read = arguments[:4]
-        values: list[Any] = [
-            None if argument is None else _literal(argument) for argument in read
-        ]
-        if any(
-            argument is not None and not isinstance(value, str)
-            for argument, value in zip(read, values)
-        ):
+        name_node, *other_nodes = arguments
+        name = _string(name_node)
+        if name is None:
             _logger.debug(
-                "%s: an argument of the alias entry `%s` is not a static string, "
+                "%s: the name of the alias entry `%s` is not a static string, "
                 "skipping it",
                 mod.path,
                 node,
             )
             return None
-        name, new_module, new_name, since = values
+        # The message is only the runtime warning, so it is never read.
+        new_module, new_name, since = (
+            None if other is None else _string(other) for other in other_nodes[:3]
+        )
+        unreadable = [
+            other is not None and value is None
+            for other, value in zip(other_nodes, (new_module, new_name, since))
+        ]
+        if any(unreadable):
+            _logger.debug(
+                "%s: an argument of the alias entry `%s` is not a static string, "
+                "documenting what can be read",
+                mod.path,
+                node,
+            )
         # Without `new_module` the symbol is still in this module, and without
         # `new_name` it kept its name, as at runtime.
-        return (
-            name,
-            f"{new_module or mod.path}.{new_name or name}",
-            new_module in (None, mod.path),
-            since,
+        new = (
+            None
+            if unreadable[0] or unreadable[1]
+            else f"{new_module or mod.path}.{new_name or name}"
         )
+        return _AliasEntry(name, new, new_module in (None, mod.path), since)
+
+    def _alias_entry_with_unpacked_keywords(
+        self, mod: Module, node: ExprCall
+    ) -> _AliasEntry | None:
+        """Read the name of an alias entry whose keyword arguments are unpacked.
+
+        Any keyword may be hidden in a `**kwargs`, so only the name is known.
+
+        Args:
+            mod: The module the entry was found in, used to report what is skipped.
+            node: The entry call.
+
+        Returns:
+            The entry with only its name, or `None` if the name cannot be read.
+        """
+        positional = [
+            argument
+            for argument in node.arguments
+            if not isinstance(argument, (ExprKeyword, ExprVarKeyword))
+        ]
+        name = _literal(positional[0]) if len(positional) == 1 else None
+        if not isinstance(name, str):
+            _logger.debug(
+                "%s: the arguments of the alias entry `%s` are unpacked, "
+                "skipping it",
+                mod.path,
+                node,
+            )
+            return None
+        _logger.debug(
+            "%s: the keyword arguments of the alias entry `%s` are unpacked, "
+            "documenting only its name",
+            mod.path,
+            node,
+        )
+        return _AliasEntry(name, None, False, None)
 
     def _mark(self, member: Attribute, text: str, *, generic: bool = False) -> None:
         """Flag one member as deprecated and give it the admonition.
