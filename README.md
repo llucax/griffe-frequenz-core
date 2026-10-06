@@ -178,15 +178,25 @@ from frequenz.core.enum import DeprecatedMember, Enum, deprecated_member
 
 class TaskStatus(Enum):
     OPEN = 1
-    PENDING = deprecated_member(1, "PENDING is deprecated, use OPEN instead")
-    WAITING = DeprecatedMember(1, "WAITING is deprecated, use OPEN instead")
+    PENDING = deprecated_member(
+        1, "mypkg.TaskStatus.PENDING is deprecated. Use mypkg.TaskStatus.OPEN instead."
+    )
+    """The task is pending.
+
+    Deprecated:
+        Deprecated since v1.2.0. Use [`OPEN`][mypkg.TaskStatus.OPEN] instead.
+    """
+
+    WAITING = DeprecatedMember(
+        1, "mypkg.TaskStatus.WAITING is deprecated. Use mypkg.TaskStatus.OPEN instead."
+    )
 ```
 
 Both members are marked, and their value is rendered as the real value instead
 of the wrapper call, so the documentation shows `PENDING = 1`. The wrapper
-only carries the runtime warning, so the notice is written by hand; without
-one, the runtime warning is shown as the notice, rendered as Markdown, and a
-warning is logged.
+only carries the runtime warning, so the notice is written by hand, as for
+`PENDING`. `WAITING` has none, so its runtime warning is shown as its notice,
+rendered as Markdown, and a warning is logged.
 
 A recognized wrapper still marks the member when its message is held in a
 variable or returned by a helper. Its value is unwrapped as written, and,
