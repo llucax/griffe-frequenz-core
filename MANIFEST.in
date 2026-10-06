@@ -1,4 +1,5 @@
 exclude .cookiecutter-replay.json
+exclude AGENTS.md
 exclude .editorconfig
 exclude .gitignore
 exclude CODEOWNERS
